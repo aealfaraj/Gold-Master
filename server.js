@@ -365,7 +365,11 @@ const server = http.createServer(async (request, response) => {
     const parts = pathParts(request.url);
 
     if (request.method === "GET" && request.url === "/health") {
-      return sendJson(response, 200, { ok: true, app: "Gold Master" });
+      return sendJson(response, 200, {
+        ok: true,
+        app: "Gold Master",
+        storage: USE_SUPABASE ? "supabase" : "signals.json"
+      });
     }
 
     if (request.method === "GET" && request.url === "/api/signals") {
@@ -375,6 +379,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && request.url === "/webhook/tradingview") {
       const alert = parseBody(await readBody(request));
+      console.log(`[webhook] received type=${alert.type || "unknown"} symbol=${alert.symbol || "unknown"} sid=${alert.sid || "none"}`);
       if (isUpdateAlert(alert)) {
         const update = parseSignalUpdate(alert);
         let signal = await findSignalStore(update.id);
@@ -386,11 +391,13 @@ const server = http.createServer(async (request, response) => {
           action = "created_from_update";
         }
         await updateSignalStore(signal);
+        console.log(`[webhook] ${action} signal id=${signal.id} status=${signal.status}`);
         return sendJson(response, 200, { ok: true, action, signal: publicSignal(signal) });
       }
 
       const signal = parseSignal(alert);
       await createSignalStore(signal);
+      console.log(`[webhook] created signal id=${signal.id} status=${signal.status}`);
       return sendJson(response, 201, { ok: true, action: "created", signal: publicSignal(signal) });
     }
 
@@ -403,6 +410,7 @@ const server = http.createServer(async (request, response) => {
 
     sendJson(response, 404, { ok: false, error: "Not found" });
   } catch (error) {
+    console.error(`[error] ${request.method} ${request.url}: ${error.message}`);
     sendJson(response, error.statusCode || 400, { ok: false, error: error.message });
   }
 });
