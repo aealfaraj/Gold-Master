@@ -6,8 +6,7 @@ const { randomUUID } = require("crypto");
 const PORT = Number(process.env.PORT || 4181);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "change-this-secret-token";
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "change-this-tradingview-secret";
-const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "signals.json");
+const DATA_FILE = path.join(__dirname, "signals.json");
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -17,7 +16,6 @@ class HttpError extends Error {
 }
 
 function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "[]");
 }
 
