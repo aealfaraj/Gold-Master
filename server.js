@@ -6,7 +6,10 @@ const { randomUUID } = require("crypto");
 const PORT = Number(process.env.PORT || 4181);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "change-this-secret-token";
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "change-this-tradingview-secret";
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const DATA_FILE = path.join(__dirname, "signals.json");
+const USE_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 
 class HttpError extends Error {
   constructor(statusCode, message) {
@@ -38,6 +41,109 @@ function readSignals() {
 function writeSignals(signals) {
   ensureDataFile();
   fs.writeFileSync(DATA_FILE, JSON.stringify(signals, null, 2));
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new HttpError(response.status, payload?.message || payload?.error || "Supabase request failed");
+  }
+  return payload;
+}
+
+function toDbSignal(signal) {
+  return {
+    id: signal.id,
+    symbol: signal.symbol,
+    direction: signal.direction,
+    entry: signal.entry || null,
+    take_profit: signal.takeProfit || null,
+    take_profit_2: signal.takeProfit2 || null,
+    stop_loss: signal.stopLoss || null,
+    last_price: signal.lastPrice || null,
+    status: signal.status,
+    type: signal.type,
+    timeframe: signal.timeframe || null,
+    pnl: signal.pnl,
+    notes: signal.notes || "",
+    raw_alert: signal.rawAlert || {},
+    created_at: signal.createdAt,
+    updated_at: signal.updatedAt
+  };
+}
+
+function fromDbSignal(row) {
+  return {
+    id: row.id,
+    symbol: row.symbol,
+    direction: row.direction,
+    entry: row.entry || "",
+    takeProfit: row.take_profit || "",
+    takeProfit2: row.take_profit_2 || "",
+    stopLoss: row.stop_loss || "",
+    lastPrice: row.last_price || "",
+    status: row.status,
+    type: row.type,
+    timeframe: row.timeframe || "",
+    pnl: row.pnl,
+    notes: row.notes || "",
+    rawAlert: row.raw_alert || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+async function readSignalsStore() {
+  if (!USE_SUPABASE) return readSignals();
+  const rows = await supabaseRequest("signals?select=*&order=created_at.desc");
+  return rows.map(fromDbSignal);
+}
+
+async function createSignalStore(signal) {
+  if (!USE_SUPABASE) {
+    const signals = readSignals();
+    signals.unshift(signal);
+    writeSignals(signals);
+    return signal;
+  }
+  const rows = await supabaseRequest("signals", {
+    method: "POST",
+    body: JSON.stringify(toDbSignal(signal))
+  });
+  return fromDbSignal(rows[0]);
+}
+
+async function updateSignalStore(signal) {
+  if (!USE_SUPABASE) {
+    const signals = readSignals();
+    const index = signals.findIndex(item => item.id === signal.id);
+    if (index === -1) signals.unshift(signal);
+    else signals[index] = signal;
+    writeSignals(signals);
+    return signal;
+  }
+  const rows = await supabaseRequest(`signals?id=eq.${encodeURIComponent(signal.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(toDbSignal(signal))
+  });
+  return fromDbSignal(rows[0]);
+}
+
+async function findSignalStore(id) {
+  if (!USE_SUPABASE) return readSignals().find(item => item.id === id) || null;
+  const rows = await supabaseRequest(`signals?select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
+  return rows[0] ? fromDbSignal(rows[0]) : null;
 }
 
 function sendJson(response, statusCode, payload) {
@@ -236,18 +342,16 @@ function requireAdmin(request) {
   if (request.headers.authorization !== expected) throw new HttpError(401, "Invalid admin token");
 }
 
-function updateSignalStatus(id, status) {
+async function updateSignalStatus(id, status) {
   const allowed = ["Active", "Pending", "TP Hit", "TP2 Hit", "SL Hit", "Closed"];
   if (!allowed.includes(status)) throw new HttpError(400, "Invalid status");
 
-  const signals = readSignals();
-  const signal = signals.find(item => item.id === id);
+  const signal = await findSignalStore(id);
   if (!signal) throw new HttpError(404, "Signal not found");
 
   signal.status = status;
   signal.updatedAt = new Date().toISOString();
-  writeSignals(signals);
-  return signal;
+  return updateSignalStore(signal);
 }
 
 function pathParts(url) {
@@ -265,37 +369,35 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && request.url === "/api/signals") {
-      return sendJson(response, 200, { signals: readSignals().map(publicSignal) });
+      const signals = await readSignalsStore();
+      return sendJson(response, 200, { signals: signals.map(publicSignal) });
     }
 
     if (request.method === "POST" && request.url === "/webhook/tradingview") {
       const alert = parseBody(await readBody(request));
-      const signals = readSignals();
       if (isUpdateAlert(alert)) {
         const update = parseSignalUpdate(alert);
-        let signal = signals.find(item => item.id === update.id);
+        let signal = await findSignalStore(update.id);
         let action = "updated";
         if (signal) {
           applySignalUpdate(signal, update);
         } else {
           signal = signalFromUpdate(update);
-          signals.unshift(signal);
           action = "created_from_update";
         }
-        writeSignals(signals);
+        await updateSignalStore(signal);
         return sendJson(response, 200, { ok: true, action, signal: publicSignal(signal) });
       }
 
       const signal = parseSignal(alert);
-      signals.unshift(signal);
-      writeSignals(signals);
+      await createSignalStore(signal);
       return sendJson(response, 201, { ok: true, action: "created", signal: publicSignal(signal) });
     }
 
     if (request.method === "PATCH" && parts[0] === "admin" && parts[1] === "signals" && parts[3] === "status") {
       requireAdmin(request);
       const body = parseBody(await readBody(request));
-      const signal = updateSignalStatus(parts[2], body.status);
+      const signal = await updateSignalStatus(parts[2], body.status);
       return sendJson(response, 200, { ok: true, signal: publicSignal(signal) });
     }
 

@@ -41,6 +41,8 @@ Environment variables:
 ```text
 ADMIN_TOKEN=make-a-long-private-admin-password
 WEBHOOK_SECRET=make-a-long-private-tradingview-secret
+SUPABASE_URL=https://yotojishckkmygmcrlrr.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 ```
 
 After Render deploys, test:
@@ -54,6 +56,25 @@ TradingView webhook URL:
 ```text
 https://your-render-service.onrender.com/webhook/tradingview
 ```
+
+## Supabase Setup
+
+In Supabase, open SQL Editor and run the contents of:
+
+```text
+supabase-schema.sql
+```
+
+Then in Render, add these environment variables:
+
+```text
+SUPABASE_URL=https://yotojishckkmygmcrlrr.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+```
+
+Use the service role key only inside Render environment variables. Do not put it in GitHub or in client-side app code.
+
+After redeploying, `GET /api/signals` will read from Supabase. If the Supabase variables are missing, the backend falls back to local `signals.json`.
 
 ## TradingView Webhook URL
 
