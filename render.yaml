@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: gold-master-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false

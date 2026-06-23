@@ -1,0 +1,16 @@
+{
+  "name": "gold-master-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gold Master TradingView webhook backend",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "check": "node --check src/server.js",
+    "test": "node src/self-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
