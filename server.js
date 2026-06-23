@@ -23,7 +23,18 @@ function ensureDataFile() {
 
 function readSignals() {
   ensureDataFile();
-  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  const raw = fs.readFileSync(DATA_FILE, "utf8").trim();
+  if (!raw) {
+    writeSignals([]);
+    return [];
+  }
+  try {
+    const signals = JSON.parse(raw);
+    return Array.isArray(signals) ? signals : [];
+  } catch (error) {
+    writeSignals([]);
+    return [];
+  }
 }
 
 function writeSignals(signals) {
